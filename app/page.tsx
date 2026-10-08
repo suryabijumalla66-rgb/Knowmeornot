@@ -59,8 +59,13 @@ export default function Home() {
     setRoomCode(backend.room.code);
     setPlayers(backend.players.map((p) => ({ id:p.id,name:p.name,avatar:p.avatar,score:p.score,correct:0,answered:0,ready:p.ready,connected:p.connected,isHost:p.isHost })));
     setScreen(backend.room.status === 'waiting' ? 'lobby' : backend.room.status === 'question_active' ? 'game' : backend.room.status === 'reveal' ? 'reveal' : backend.room.status === 'finished' ? 'results' : 'lobby');
-    return subscribeToRoom(backend.room.id, () => { void actions.snapshot(backend.room.id).then(setBackend).catch((e) => setError(e.message)); }, setPresenceCount);
   }, [backend?.room.id, backend?.room.version]);
+
+  useEffect(() => {
+    const roomId=backend?.room.id;
+    if(!roomId)return;
+    return subscribeToRoom(roomId, async()=>{try{setBackend(await actions.snapshot(roomId))}catch(e){setError((e as Error).message)}},setPresenceCount);
+  },[backend?.room.id]);
 
   useEffect(() => {
     if (!backend?.round?.deadlineAt || backend.round.status !== 'active') return;

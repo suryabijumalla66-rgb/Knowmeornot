@@ -350,6 +350,16 @@ end $$;
 revoke all on function public.game_action(text,uuid,jsonb) from public,anon,authenticated;
 grant execute on function public.game_action(text,uuid,jsonb) to service_role;
 
+-- Low-latency browser RPC. Identity comes only from the verified Supabase JWT.
+create or replace function public.game_action_client(action text,payload jsonb default '{}'::jsonb) returns jsonb language plpgsql security definer set search_path='' as $$
+declare caller uuid:=(select auth.uid());
+begin
+  if caller is null then raise exception 'authentication_required' using errcode='42501'; end if;
+  return public.game_action(action,caller,payload);
+end $$;
+revoke all on function public.game_action_client(text,jsonb) from public,anon;
+grant execute on function public.game_action_client(text,jsonb) to authenticated;
+
 create or replace function game_private.broadcast_room_change() returns trigger language plpgsql security definer set search_path='' as $$
 declare room_id uuid; begin room_id:=case when TG_OP='DELETE' then old.room_id else new.room_id end; perform realtime.send(jsonb_build_object('roomId',room_id,'changedAt',clock_timestamp()),'state_changed','room:'||room_id::text||':game',true); return null; end $$;
 create trigger members_broadcast after insert or update or delete on public.room_members for each row execute function game_private.broadcast_room_change();
@@ -402,5 +412,4 @@ with base(category,question_type,prompt,options) as (values
 ), twists(suffix) as (values(''),(' — decide instantly.'),(' — no overthinking.'),(' when nobody is judging?'))
 insert into public.questions(category,question_type,prompt,options,is_curated,enabled)
 select category,question_type,prompt||suffix,options,true,true from base cross join twists;
-
 
