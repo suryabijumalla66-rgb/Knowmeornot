@@ -1,6 +1,10 @@
 import { createClient } from 'npm:@supabase/supabase-js@2.76.1';
 
-const cors = { 'Access-Control-Allow-Origin': '*', 'Access-Control-Allow-Headers': 'authorization, apikey, content-type', 'Access-Control-Allow-Methods': 'POST, OPTIONS' };
+const cors = {
+  'Access-Control-Allow-Origin': '*',
+  'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type, x-retry-count, traceparent, tracestate, baggage',
+  'Access-Control-Allow-Methods': 'POST, OPTIONS',
+};
 const allowed = new Set(['create_room','join_room','snapshot','ready','start','answer','advance','leave','remove_player','heartbeat','rematch']);
 
 Deno.serve(async (request) => {
