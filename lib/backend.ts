@@ -56,8 +56,13 @@ export const actions = {
 };
 
 async function readableFunctionError(error:unknown){
-  const context=(error as {context?:Response})?.context;
-  if(context){const body=await context.json().catch(()=>null) as {error?:string}|null;if(body?.error)return messageFor(body.error)}
+  const context=(error as {context?:unknown})?.context;
+  if(context && typeof (context as {json?:unknown}).json === 'function'){
+    const body=await (context as Response).json().catch(()=>null) as {error?:string;message?:string}|null;
+    if(body?.error)return messageFor(body.error);
+    if(body?.message)return body.message;
+  }
+  if(context instanceof Error && context.message)return context.message;
   return (error as Error)?.message ?? 'The game server could not complete that action.';
 }
 function messageFor(code:string){return ({room_unavailable:'That room is unavailable or has already started.',room_full:'That room is full.',display_name_taken:'That name is already in use in this room.',players_not_ready:'Every connected player must be ready before starting.',answer_already_submitted:'Your answer is already locked.',round_closed:'This round has ended.',host_only:'Only the host can do that.',rate_limited:'Too many attempts. Please wait a moment.',insufficient_questions:'This question pack does not have enough questions.'} as Record<string,string>)[code]??code.replaceAll('_',' ')}
