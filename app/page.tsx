@@ -7,7 +7,7 @@ import { buildRoundPlan, makeRoomCode, renderQuestion, scorePrediction, type Gam
 import { questions } from '@/lib/questions';
 import { actions, backendConfigured, ensureGuestSession, subscribeToRoom, type BackendSnapshot } from '@/lib/backend';
 
-type Screen = 'home' | 'create' | 'join' | 'lobby' | 'game' | 'reveal' | 'results';
+type Screen = 'home' | 'create' | 'join' | 'lobby' | 'game' | 'waiting' | 'reveal' | 'results';
 const avatars = ['🛸', '🦊', '🐼', '🦁', '🐸', '🐙', '🦄', '🦉'];
 const demoPlayers: GamePlayer[] = [
   { id: 'you', name: 'Player 1', avatar: '🛸', score: 0, correct: 0, answered: 0, ready: true, connected: true, isHost: true },
@@ -58,7 +58,7 @@ export default function Home() {
     localStorage.setItem('kmn-room-id', backend.room.id);
     setRoomCode(backend.room.code);
     setPlayers(backend.players.map((p) => ({ id:p.id,name:p.name,avatar:p.avatar,score:p.score,correct:0,answered:0,ready:p.ready,connected:p.connected,isHost:p.isHost })));
-    setScreen(backend.room.status === 'waiting' ? 'lobby' : backend.room.status === 'question_active' ? 'game' : backend.room.status === 'reveal' ? 'reveal' : backend.room.status === 'finished' ? 'results' : 'lobby');
+    setScreen(backend.room.status === 'waiting' ? 'lobby' : backend.room.status === 'question_active' ? (backend.round?.myAnswer != null ? 'waiting' : 'game') : backend.room.status === 'reveal' ? 'reveal' : backend.room.status === 'finished' ? 'results' : 'lobby');
   }, [backend?.room.id, backend?.room.version]);
 
   useEffect(() => {
@@ -74,9 +74,24 @@ export default function Home() {
     return()=>clearTimeout(timer);
   },[backend?.round?.id,backend?.round?.deadlineAt,backend?.round?.status]);
 
+  useEffect(()=>{
+    const roomId=backend?.room.id;
+    if(!roomId)return;
+    let cancelled=false;
+    let timer:ReturnType<typeof setTimeout>;
+    const poll=async()=>{
+      if(!cancelled&&document.visibilityState==='visible'&&navigator.onLine){
+        try{setBackend(await actions.snapshot(roomId))}catch(e){setError((e as Error).message)}
+      }
+      if(!cancelled)timer=setTimeout(poll,3000);
+    };
+    timer=setTimeout(poll,3000);
+    return()=>{cancelled=true;clearTimeout(timer)};
+  },[backend?.room.id]);
+
   const createRoom = async () => { setError(''); if (!backendConfigured) { setRoomCode(makeRoomCode()); setPlayers((list) => list.map((p, i) => i ? p : { ...p, name, avatar })); setScreen('lobby'); return; } setBusy(true); try { setBackend(screen === 'join' ? await actions.join({code:roomCode,name,avatar}) : await actions.create({name,avatar,maxPlayers:8,questionsPerPlayer:2,roundSeconds:15,category:'Mixed'})); } catch(e){setError((e as Error).message)} finally{setBusy(false)} };
   const copyInvite = async () => { await navigator.clipboard?.writeText(`${location.origin}/?room=${roomCode}`); setCopied(true); setTimeout(() => setCopied(false), 1800); };
-  const submit = async () => { if (selected === null || locked) return; setLocked(true); if ('vibrate' in navigator) navigator.vibrate(35); if (backend?.round) { try { setBackend(await actions.answer(backend.round.id,selected)); } catch(e){setError((e as Error).message);setLocked(false)} } };
+  const submit = async () => { if (selected === null || locked) return; setLocked(true); if ('vibrate' in navigator) navigator.vibrate(35); if (backend?.round) { try { const snapshot=await actions.answer(backend.round.id,selected);setBackend(snapshot);setScreen(snapshot.room.status==='reveal'?'reveal':'waiting'); } catch(e){setError((e as Error).message);setLocked(false)} } };
   const reveal = () => { if (!locked) return; const correct = selected === 2; setPlayers((list) => list.map((p) => p.id === 'you' ? { ...p, score: p.score + scorePrediction(correct, 4200), answered: p.answered + 1, correct: p.correct + Number(correct) } : p)); setScreen('reveal'); };
   const nextRound = async () => { if (backend) { setBusy(true); try { setBackend(await actions.advance(backend.room.id)); setSelected(null); setLocked(false); } catch(e){setError((e as Error).message)} finally{setBusy(false)} return; } if (round >= 3) setScreen('results'); else { setRound((v) => v + 1); setSelected(null); setLocked(false); setScreen('game'); } };
 
@@ -98,6 +113,8 @@ export default function Home() {
     </section>}
 
     {screen === 'game' && <section className="game screen enter"><div className="game-meta"><div><span>ROUND {backend?.game?.currentRound ?? round + 1} OF {backend?.game?.totalRounds ?? plan.length}</span><div className="progress"><i style={{width: `${((backend?.game?.currentRound ?? round + 1) / (backend?.game?.totalRounds ?? plan.length)) * 100}%`}} /></div></div><div className="connection"><Wifi /> Live</div></div><div className="question-wrap"><div className="subject"><div className="avatar subject-avatar">{subject.avatar}</div><div><p>READING THE MIND OF</p><h2>{subject.name}</h2></div></div><Countdown deadline={backend?.round?.deadlineAt}/><h1>{renderQuestion(current.question.text, subject.name)}</h1><p className="instruction">{subject.id === (backend?.selfMemberId ?? 'you') ? 'Choose your real answer. Everyone else is guessing.' : `Which answer will ${subject.name} choose?`}</p><div className="answers">{current.question.options.map((option, index) => <button disabled={locked || backend?.round?.myAnswer != null} className={`${selected === index || backend?.round?.myAnswer === index ? 'answer picked' : 'answer'} a${index}`} key={option} onClick={() => setSelected(index)}><span>{String.fromCharCode(65 + index)}</span><b>{option}</b>{(selected === index || backend?.round?.myAnswer === index) && <Check />}</button>)}</div><button className="primary giant submit" disabled={selected === null || locked || backend?.round?.myAnswer != null} onClick={submit}>{locked || backend?.round?.myAnswer != null ? <><LockKeyhole /> Answer locked</> : 'Lock it in'}</button>{!backend && locked && <button className="text-button" onClick={reveal}>Demo: show reveal <ChevronRight /></button>}<div className="answer-status"><div className="faces">{players.slice(0,3).map(p=><span key={p.id}>{p.avatar}</span>)}</div><b>{backend?.round?.answerCount ?? (locked ? 4 : 3)} of {players.length} answered</b><span>Waiting for everyone…</span></div></div></section>}
+
+    {screen === 'waiting' && backend?.round && <section className="game screen waiting enter"><div className="game-meta"><div><span>ROUND {backend.game?.currentRound ?? round + 1} OF {backend.game?.totalRounds ?? plan.length}</span><div className="progress"><i style={{width: `${((backend.game?.currentRound ?? round + 1) / (backend.game?.totalRounds ?? plan.length)) * 100}%`}} /></div></div><div className="connection"><Wifi /> Auto-refreshing</div></div><div className="question-wrap locked-state"><div className="locked-check"><Check /></div><p className="eyebrow">ANSWER LOCKED</p><h1>{current.question.options[backend.round.myAnswer ?? selected ?? 0]}</h1><p className="instruction">Your answer is safe. The reveal will open automatically as soon as everyone has answered.</p><Countdown deadline={backend.round.deadlineAt}/><div className="answer-status"><div className="faces">{players.slice(0,3).map(p=><span key={p.id}>{p.avatar}</span>)}</div><b>{backend.round.answerCount} of {players.length} answered</b><span>Waiting for everyone…</span></div><button className="secondary giant refresh-now" disabled={busy} onClick={async()=>{setBusy(true);try{setBackend(await actions.snapshot(backend.room.id))}catch(e){setError((e as Error).message)}finally{setBusy(false)}}}>{busy?'Refreshing…':'Refresh now'}</button></div></section>}
 
     {screen === 'reveal' && <section className="screen reveal enter"><div className="confetti" aria-hidden="true">✦　●　◆　✦　▲　●　✦</div><p className="eyebrow">THE ANSWER WAS</p><div className="reveal-answer"><span>{String.fromCharCode(65+revealOption)}</span><h1>{backend?.round?.reveal?.skipped?'Round skipped':current.question.options[revealOption]}</h1></div><div className="subject reveal-subject"><div className="avatar subject-avatar">{subject.avatar}</div><div><h2>{backend?.round?.reveal?.skipped?`${subject.name} ran out of time`:`${subject.name} has spoken!`}</h2><p>{backend?.round?.reveal?.skipped?'No points were awarded.':'No hesitation. That’s the real pick.'}</p></div></div><div className="result-card"><PartyPopper /><div><h2>{(myReveal?.correct ?? selected === 2) ? `You know ${subject.name}!` : `${subject.name} kept you guessing!`}</h2><p>{(myReveal?.correct ?? selected === 2) ? 'Correct prediction · Points awarded' : 'Good guess — the next mind is waiting.'}</p></div><b className="points">+{myReveal?.points ?? (selected === 2 ? 125 : 0)}</b></div><div className="mini-board"><h3>Round standings</h3>{[...players].sort((a,b)=>b.score-a.score).map((p,i)=><div key={p.id}><span className="rank">{i+1}</span><span>{p.avatar}</span><b>{p.name}</b><em>{p.score} pts</em></div>)}</div><button className="primary giant" disabled={busy || Boolean(backend && !backend.room.isHost)} onClick={nextRound}>{backend && !backend.room.isHost?'Waiting for host':(backend?.game && backend.game.currentRound>=backend.game.totalRounds) || round >= 3 ? 'See final results' : 'Next question'} <ChevronRight /></button></section>}
 
