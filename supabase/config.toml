@@ -1,0 +1,12 @@
+project_id = "know-me-or-not"
+
+[auth]
+enabled = true
+enable_anonymous_sign_ins = true
+
+[db.seed]
+enabled = true
+sql_paths = ["./seed.sql"]
+
+[functions.game-api]
+verify_jwt = true
